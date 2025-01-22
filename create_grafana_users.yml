@@ -1,0 +1,30 @@
+---
+- name: Create Grafana organization users
+  hosts: localhost
+  gather_facts: false
+
+  vars:
+    url: "{{ lookup('ansible.builtin.env', 'GRAFANA_SVC') }}"
+    grafana_admin_username: "admin"
+  tasks:
+    - name: Create the users
+      community.grafana.grafana_user:
+        url: "{{ url }}"
+        url_username: "{{ grafana_admin_username }}"
+        url_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_ADMIN_PASS') }}"
+        name: "{{ item.value.name }}"
+        email: "{{ item.value.email }}"
+        login: "{{ item.key }}"
+        password: "{{ item.value.password }}"
+      loop: "{{ lookup('file', 'users') | from_json | dict2items }}"
+
+    - name: Apply the organization roles to the users
+      community.grafana.grafana_organization_user:
+        url: "{{ url }}"
+        url_username: "{{ grafana_admin_username }}"
+        url_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_ADMIN_PASS') }}"
+        state: present
+        login: "{{ item.key }}"
+        org_id: "{{ item.value.org_id }}"
+        role: "{{ item.value.role }}"
+      loop: "{{ lookup('file', 'users') | from_json | dict2items }}"

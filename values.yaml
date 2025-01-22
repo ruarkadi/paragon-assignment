@@ -1,0 +1,67 @@
+
+grafana:
+  extraObjects:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: grafana-users
+      data:
+        users: |
+          {
+            "admin_user": {
+              "email": "admin_user@acme.com",
+              "name": "Admin user",
+              "org_id": "1",
+              "password": "admin_password",
+              "role": "admin"
+            },
+            "editor_user": {
+              "email": "editor_user@acme.com",
+              "name": "Editor user",
+              "org_id": "1",
+              "password": "editor_password",
+              "role": "editor"
+            },
+            "viewer_user": {
+              "email": "viewer_user@acme.com",
+              "name": "Viewer user",
+              "org_id": "1",
+              "password": "viewer_password",
+              "role": "viewer"
+            }
+          }
+    - apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: create-grafana-users
+      spec:
+        template:
+          spec:
+            initContainers:
+            - name: init-service
+              image: busybox:1.28
+              command: 
+                - 'sh'
+                - '-c'
+                - "until nslookup {{ .Release.Name }}.{{ .Release.Namespace }}.svc.cluster.local; do echo waiting for myservice; sleep 5; done"
+            containers:
+              - name: ansible
+                image: demo/grafana-users-runner
+                env:
+                  - name: GRAFANA_ADMIN_PASS
+                    valueFrom:
+                      secretKeyRef:
+                        name: grafana
+                        key: admin-password
+                  - name: GRAFANA_SVC
+                    value: "http://{{ .Release.Name }}"
+                volumeMounts:
+                  - name: grafana-users
+                    mountPath: /users
+                    subPath: users
+            volumes:
+              - name: grafana-users
+                configMap:
+                  name: grafana-users
+            restartPolicy: Never
+        backoffLimit: 4

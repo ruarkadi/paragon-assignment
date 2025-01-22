@@ -1,0 +1,103 @@
+grafana:  
+  extraObjects:
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: grafana-users
+      data:
+        grafana_users_playbook.yml: |
+          {{`
+          ---
+          - name: Manage Grafana organization users
+            hosts: localhost
+            gather_facts: false
+
+            vars:
+              url: "{{ lookup('ansible.builtin.env', 'GRAFANA_SVC') }}"
+              grafana_admin_username: "admin"
+            tasks:
+              - name: Create the users
+                community.grafana.grafana_user:
+                  url: "{{ url }}"
+                  url_username: "{{ grafana_admin_username }}"
+                  url_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_ADMIN_PASS') }}"
+                  name: "{{ item.value.name }}"
+                  email: "{{ item.value.email }}"
+                  login: "{{ item.key }}"
+                  password: "{{ item.value.password }}"
+                loop: "{{ lookup('file', 'users') | from_json | dict2items }}"
+
+              - name: Apply the organization roles to the users
+                community.grafana.grafana_organization_user:
+                  url: "{{ url }}"
+                  url_username: "{{ grafana_admin_username }}"
+                  url_password: "{{ lookup('ansible.builtin.env', 'GRAFANA_ADMIN_PASS') }}"
+                  state: present
+                  login: "{{ item.key }}"
+                  org_id: "{{ item.value.org_id }}"
+                  role: "{{ item.value.role }}"
+                loop: "{{ lookup('file', 'users') | from_json | dict2items }}"
+          `}}
+        users: |
+          {
+            "admin_user": {
+              "email": "admin_user@acme.com",
+              "name": "Admin user",
+              "org_id": "1",
+              "password": "admin_password",
+              "role": "admin"
+            },
+            "editor_user": {
+              "email": "editor_user@acme.com",
+              "name": "Editor user",
+              "org_id": "1",
+              "password": "editor_password",
+              "role": "editor"
+            },
+            "viewer_user": {
+              "email": "viewer_user@acme.com",
+              "name": "Viewer user",
+              "org_id": "1",
+              "password": "viewer_password",
+              "role": "viewer"
+            }
+          }
+    - apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: create-grafana-users
+      spec:
+        template:
+          spec:
+            initContainers:
+            - name: init-service
+              image: busybox:1.28
+              command: 
+                - 'sh'
+                - '-c'
+                - "until nslookup {{ .Release.Name }}.{{ .Release.Namespace }}.svc.cluster.local; do echo waiting for myservice; sleep 5; done"
+            containers:
+              - name: ansible
+                image: alpine/ansible
+                command: [ "ansible-playbook", "/grafana_users_playbook.yml"]
+                env:
+                  - name: GRAFANA_ADMIN_PASS
+                    valueFrom:
+                      secretKeyRef:
+                        name: grafana
+                        key: admin-password
+                  - name: GRAFANA_SVC
+                    value: "http://{{ .Release.Name }}"
+                volumeMounts:
+                  - name: grafana-users
+                    mountPath: /grafana_users_playbook.yml
+                    subPath: grafana_users_playbook.yml
+                  - name: grafana-users
+                    mountPath: /users
+                    subPath: users
+            volumes:
+              - name: grafana-users
+                configMap:
+                  name: grafana-users
+            restartPolicy: Never
+        backoffLimit: 4
